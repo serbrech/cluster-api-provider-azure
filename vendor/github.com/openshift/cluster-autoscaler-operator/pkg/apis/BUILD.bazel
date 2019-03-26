@@ -1,0 +1,16 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "addtoscheme_autoscaling_v1alpha1.go",
+        "apis.go",
+    ],
+    importmap = "sigs.k8s.io/cluster-api-provider-azure/vendor/github.com/openshift/cluster-autoscaler-operator/pkg/apis",
+    importpath = "github.com/openshift/cluster-autoscaler-operator/pkg/apis",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//vendor/github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1alpha1:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
+    ],
+)

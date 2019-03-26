@@ -19,7 +19,6 @@ package virtualmachines
 import (
 	"context"
 	"crypto/rand"
-	"crypto/rsa"
 	"encoding/base64"
 	"fmt"
 
@@ -27,7 +26,6 @@ import (
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-12-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
-	"golang.org/x/crypto/ssh"
 	"k8s.io/klog"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure"
@@ -42,6 +40,7 @@ type Spec struct {
 	Size       string
 	Image      v1alpha1.Image
 	OSDisk     v1alpha1.OSDisk
+	CustomData string
 }
 
 // Get provides information about a virtual network.
@@ -50,7 +49,7 @@ func (s *Service) Get(ctx context.Context, spec azure.Spec) (interface{}, error)
 	if !ok {
 		return compute.VirtualMachine{}, errors.New("invalid vm specification")
 	}
-	vm, err := s.Client.Get(ctx, s.Scope.ClusterConfig.ResourceGroup, vmSpec.Name, "")
+	vm, err := s.Client.Get(ctx, s.Scope.ResourceGroup(), vmSpec.Name, "")
 	if err != nil && azure.ResourceNotFound(err) {
 		return nil, errors.Wrapf(err, "vm %s not found", vmSpec.Name)
 	} else if err != nil {
@@ -79,42 +78,61 @@ func (s *Service) CreateOrUpdate(ctx context.Context, spec azure.Spec) error {
 
 	klog.V(2).Infof("creating vm %s ", vmSpec.Name)
 
-	sshKeyData := vmSpec.SSHKeyData
-	if sshKeyData == "" {
-		privateKey, perr := rsa.GenerateKey(rand.Reader, 2048)
-		if perr != nil {
-			return errors.Wrap(perr, "Failed to generate private key")
-		}
-
-		publicRsaKey, perr := ssh.NewPublicKey(&privateKey.PublicKey)
-		if perr != nil {
-			return errors.Wrap(perr, "Failed to generate public key")
-		}
-		sshKeyData = string(ssh.MarshalAuthorizedKey(publicRsaKey))
-	}
-
 	randomPassword, err := GenerateRandomString(32)
 	if err != nil {
 		return errors.Wrapf(err, "failed to generate random string")
 	}
 
+	imageReference := &compute.ImageReference{}
+	if vmSpec.Image.ResourceID != "" {
+		resourceID := fmt.Sprintf("/subscriptions/%s%s", s.Scope.SubscriptionID, vmSpec.Image.ResourceID)
+		imageReference = &compute.ImageReference{
+			ID: to.StringPtr(resourceID),
+		}
+	} else {
+		imageReference = &compute.ImageReference{
+			Publisher: to.StringPtr(vmSpec.Image.Publisher),
+			Offer:     to.StringPtr(vmSpec.Image.Offer),
+			Sku:       to.StringPtr(vmSpec.Image.SKU),
+			Version:   to.StringPtr(vmSpec.Image.Version),
+		}
+	}
+
+	osProfile := &compute.OSProfile{
+		ComputerName:  to.StringPtr(vmSpec.Name),
+		AdminUsername: to.StringPtr(azure.DefaultUserName),
+		AdminPassword: to.StringPtr(randomPassword),
+	}
+
+	if vmSpec.SSHKeyData != "" {
+		osProfile.LinuxConfiguration = &compute.LinuxConfiguration{
+			SSH: &compute.SSHConfiguration{
+				PublicKeys: &[]compute.SSHPublicKey{
+					{
+						Path:    to.StringPtr(fmt.Sprintf("/home/%s/.ssh/authorized_keys", azure.DefaultUserName)),
+						KeyData: to.StringPtr(vmSpec.SSHKeyData),
+					},
+				},
+			},
+		}
+	}
+
+	if vmSpec.CustomData != "" {
+		osProfile.CustomData = to.StringPtr(vmSpec.CustomData)
+	}
+
 	future, err := s.Client.CreateOrUpdate(
 		ctx,
-		s.Scope.ClusterConfig.ResourceGroup,
+		s.Scope.ResourceGroup(),
 		vmSpec.Name,
 		compute.VirtualMachine{
-			Location: to.StringPtr(s.Scope.ClusterConfig.Location),
+			Location: to.StringPtr(s.Scope.Location()),
 			VirtualMachineProperties: &compute.VirtualMachineProperties{
 				HardwareProfile: &compute.HardwareProfile{
 					VMSize: compute.VirtualMachineSizeTypes(vmSpec.Size),
 				},
 				StorageProfile: &compute.StorageProfile{
-					ImageReference: &compute.ImageReference{
-						Publisher: to.StringPtr(vmSpec.Image.Publisher),
-						Offer:     to.StringPtr(vmSpec.Image.Offer),
-						Sku:       to.StringPtr(vmSpec.Image.SKU),
-						Version:   to.StringPtr(vmSpec.Image.Version),
-					},
+					ImageReference: imageReference,
 					OsDisk: &compute.OSDisk{
 						Name:         to.StringPtr(fmt.Sprintf("%s_OSDisk", vmSpec.Name)),
 						OsType:       compute.OperatingSystemTypes(vmSpec.OSDisk.OSType),
@@ -125,21 +143,7 @@ func (s *Service) CreateOrUpdate(ctx context.Context, spec azure.Spec) error {
 						},
 					},
 				},
-				OsProfile: &compute.OSProfile{
-					ComputerName:  to.StringPtr(vmSpec.Name),
-					AdminUsername: to.StringPtr(azure.DefaultUserName),
-					AdminPassword: to.StringPtr(randomPassword),
-					LinuxConfiguration: &compute.LinuxConfiguration{
-						SSH: &compute.SSHConfiguration{
-							PublicKeys: &[]compute.SSHPublicKey{
-								{
-									Path:    to.StringPtr(fmt.Sprintf("/home/%s/.ssh/authorized_keys", azure.DefaultUserName)),
-									KeyData: to.StringPtr(sshKeyData),
-								},
-							},
-						},
-					},
-				},
+				OsProfile: osProfile,
 				NetworkProfile: &compute.NetworkProfile{
 					NetworkInterfaces: &[]compute.NetworkInterfaceReference{
 						{
@@ -177,13 +181,13 @@ func (s *Service) Delete(ctx context.Context, spec azure.Spec) error {
 		return errors.New("invalid vm Specification")
 	}
 	klog.V(2).Infof("deleting vm %s ", vmSpec.Name)
-	future, err := s.Client.Delete(ctx, s.Scope.ClusterConfig.ResourceGroup, vmSpec.Name)
+	future, err := s.Client.Delete(ctx, s.Scope.ResourceGroup(), vmSpec.Name)
 	if err != nil && azure.ResourceNotFound(err) {
 		// already deleted
 		return nil
 	}
 	if err != nil {
-		return errors.Wrapf(err, "failed to delete vm %s in resource group %s", vmSpec.Name, s.Scope.ClusterConfig.ResourceGroup)
+		return errors.Wrapf(err, "failed to delete vm %s in resource group %s", vmSpec.Name, s.Scope.ResourceGroup())
 	}
 
 	err = future.WaitForCompletionRef(ctx, s.Client.Client)

@@ -67,9 +67,9 @@ type AzureMachineProviderCondition struct {
 
 const (
 	// ControlPlane machine label
-	ControlPlane string = "controlplane"
+	ControlPlane string = "master"
 	// Node machine label
-	Node string = "node"
+	Node string = "worker"
 )
 
 // Network encapsulates Azure networking resources.
@@ -89,19 +89,6 @@ type Network struct {
 // Tags defines resource tags.
 type Tags map[string]*string
 */
-
-// Subnets is a slice of Subnet.
-type Subnets []*SubnetSpec
-
-// TODO
-// ToMap returns a map from id to subnet.
-func (s Subnets) ToMap() map[string]*SubnetSpec {
-	res := make(map[string]*SubnetSpec)
-	for _, x := range s {
-		res[x.ID] = x
-	}
-	return res
-}
 
 // SecurityGroupRole defines the unique role of a security group.
 type SecurityGroupRole string
@@ -369,10 +356,11 @@ type VM struct {
 }
 
 type Image struct {
-	Publisher string `json:"publisher"`
-	Offer     string `json:"offer"`
-	SKU       string `json:"sku"`
-	Version   string `json:"version"`
+	Publisher  string `json:"publisher"`
+	Offer      string `json:"offer"`
+	SKU        string `json:"sku"`
+	Version    string `json:"version"`
+	ResourceID string `json:"resourceID"`
 }
 
 // VMIdentity defines the identity of the virtual machine, if configured.

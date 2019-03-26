@@ -17,32 +17,47 @@ limitations under the License.
 package actuators
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/go-autorest/autorest/adal"
+	"github.com/Azure/go-autorest/autorest/azure"
+	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	"github.com/pkg/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types" //metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
-	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-	client "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
+)
+
+const (
+	// AzureCredsSubscriptionIDKey subcription ID
+	AzureCredsSubscriptionIDKey = "azure_subscription_id"
+	// AzureCredsClientIDKey client id
+	AzureCredsClientIDKey = "azure_client_id"
+	// AzureCredsClientSecretKey client secret
+	AzureCredsClientSecretKey = "azure_client_secret"
+	// AzureCredsTenantIDKey tenant ID
+	AzureCredsTenantIDKey = "azure_tenant_id"
+	// AzureCredsResourceGroupKey resource group
+	AzureCredsResourceGroupKey = "azure_resourcegroup"
+	// AzureCredsRegionKey region
+	AzureCredsRegionKey = "azure_region"
 )
 
 // MachineScopeParams defines the input parameters used to create a new MachineScope.
 type MachineScopeParams struct {
-	AzureClients
-	Cluster *clusterv1.Cluster
-	Machine *clusterv1.Machine
-	Client  client.ClusterV1alpha1Interface
+	Machine *machinev1.Machine
+	Client  client.Client
 }
 
 // NewMachineScope creates a new MachineScope from the supplied parameters.
 // This is meant to be called for each machine actuator operation.
 func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
-	scope, err := NewScope(ScopeParams{AzureClients: params.AzureClients, Client: params.Client, Cluster: params.Cluster})
-	if err != nil {
-		return nil, err
-	}
-
 	machineConfig, err := MachineConfigFromProviderSpec(params.Client, params.Machine.Spec.ProviderSpec)
 	if err != nil {
 		return nil, errors.Wrap(err, "failed to get machine config")
@@ -53,28 +68,87 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		return nil, errors.Wrap(err, "failed to get machine provider status")
 	}
 
-	var machineClient client.MachineInterface
-	if params.Client != nil {
-		machineClient = params.Client.Machines(params.Machine.Namespace)
+	secretName := fmt.Sprintf("%s/%s", machineConfig.CredentialsSecret.Namespace, machineConfig.CredentialsSecret.Name)
+
+	var secret corev1.Secret
+	if err := params.Client.Get(context.Background(), client.ObjectKey{Namespace: machineConfig.CredentialsSecret.Namespace, Name: machineConfig.CredentialsSecret.Name}, &secret); err != nil {
+		return nil, err
+	}
+
+	subscriptionID, ok := secret.Data[AzureCredsSubscriptionIDKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure subscription id %v did not contain key %v",
+			secretName, AzureCredsSubscriptionIDKey)
+	}
+	clientID, ok := secret.Data[AzureCredsClientIDKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure client id %v did not contain key %v",
+			secretName, AzureCredsClientIDKey)
+	}
+	clientSecret, ok := secret.Data[AzureCredsClientSecretKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure client secret %v did not contain key %v",
+			secretName, AzureCredsClientSecretKey)
+	}
+	tenantID, ok := secret.Data[AzureCredsTenantIDKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure tenant id %v did not contain key %v",
+			secretName, AzureCredsTenantIDKey)
+	}
+	resourceGroup, ok := secret.Data[AzureCredsResourceGroupKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure resource group %v did not contain key %v",
+			secretName, AzureCredsResourceGroupKey)
+	}
+	region, ok := secret.Data[AzureCredsRegionKey]
+	if !ok {
+		return nil, fmt.Errorf("Azure region %v did not contain key %v",
+			secretName, AzureCredsRegionKey)
+	}
+
+	env, err := azure.EnvironmentFromName("AzurePublicCloud")
+	if err != nil {
+		return nil, err
+	}
+	oauthConfig, err := adal.NewOAuthConfig(
+		env.ActiveDirectoryEndpoint, string(tenantID))
+	if err != nil {
+		return nil, err
+	}
+
+	token, err := adal.NewServicePrincipalToken(
+		*oauthConfig, string(clientID), string(clientSecret), env.ResourceManagerEndpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	authorizer, err := autorest.NewBearerAuthorizer(token), nil
+	if err != nil {
+		return nil, errors.Errorf("failed to create azure session: %v", err)
 	}
 
 	return &MachineScope{
-		Scope:         scope,
-		Machine:       params.Machine,
-		MachineClient: machineClient,
-		MachineConfig: machineConfig,
-		MachineStatus: machineStatus,
+		Authorizer:     authorizer,
+		SubscriptionID: string(subscriptionID),
+		Region:         string(region),
+		Group:          string(resourceGroup),
+		Machine:        params.Machine,
+		MachineClient:  params.Client,
+		MachineConfig:  machineConfig,
+		MachineStatus:  machineStatus,
 	}, nil
 }
 
 // MachineScope defines a scope defined around a machine and its cluster.
 type MachineScope struct {
-	*Scope
-
-	Machine       *clusterv1.Machine
-	MachineClient client.MachineInterface
-	MachineConfig *v1alpha1.AzureMachineProviderSpec
-	MachineStatus *v1alpha1.AzureMachineProviderStatus
+	SubscriptionID string
+	Region         string
+	Group          string
+	Authorizer     autorest.Authorizer
+	Machine        *machinev1.Machine
+	MachineClient  client.Client
+	MachineConfig  *v1alpha1.AzureMachineProviderSpec
+	MachineStatus  *v1alpha1.AzureMachineProviderStatus
 }
 
 // Name returns the machine name.
@@ -94,28 +168,23 @@ func (m *MachineScope) Role() string {
 
 // Location returns the machine location.
 func (m *MachineScope) Location() string {
-	return m.Scope.Location()
+	return m.Region
 }
 
-func (m *MachineScope) storeMachineSpec(machine *clusterv1.Machine) (*clusterv1.Machine, error) {
-	ext, err := v1alpha1.EncodeMachineSpec(m.MachineConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	machine.Spec.ProviderSpec.Value = ext
-	return m.MachineClient.Update(machine)
+// ResourceGroup returns the machine resource group.
+func (m *MachineScope) ResourceGroup() string {
+	return m.Group
 }
 
-func (m *MachineScope) storeMachineStatus(machine *clusterv1.Machine) (*clusterv1.Machine, error) {
+func (m *MachineScope) storeMachineStatus(machine *machinev1.Machine) error {
 	ext, err := v1alpha1.EncodeMachineStatus(m.MachineStatus)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	m.Machine.Status.DeepCopyInto(&machine.Status)
 	machine.Status.ProviderStatus = ext
-	return m.MachineClient.UpdateStatus(machine)
+	return m.MachineClient.Status().Update(context.Background(), machine)
 }
 
 // Close the MachineScope by updating the machine spec, machine status.
@@ -124,20 +193,49 @@ func (m *MachineScope) Close() {
 		return
 	}
 
-	latestMachine, err := m.storeMachineSpec(m.Machine)
-	if err != nil {
-		klog.Errorf("[machinescope] failed to update machine %q in namespace %q: %v", m.Machine.Name, m.Machine.Namespace, err)
-		return
-	}
-
-	_, err = m.storeMachineStatus(latestMachine)
+	err := m.storeMachineStatus(m.Machine)
 	if err != nil {
 		klog.Errorf("[machinescope] failed to store provider status for machine %q in namespace %q: %v", m.Machine.Name, m.Machine.Namespace, err)
 	}
 }
 
+// // providerConfigFromMachine gets the machine provider config MachineSetSpec from the
+// // specified cluster-api MachineSpec.
+// func providerConfigFromMachine(client client.Client, machine *machinev1.Machine, codec *providerconfigv1.AWSProviderConfigCodec) (*providerconfigv1.AWSMachineProviderConfig, error) {
+// 	var providerSpecRawExtention runtime.RawExtension
+
+// 	providerSpec := machine.Spec.ProviderSpec
+// 	if providerSpec.Value == nil && providerSpec.ValueFrom == nil {
+// 		return nil, fmt.Errorf("unable to find machine provider config: neither Spec.ProviderSpec.Value nor Spec.ProviderSpec.ValueFrom set")
+// 	}
+
+// 	// If no providerSpec.Value then we lookup for machineClass
+// 	if providerSpec.Value != nil {
+// 		providerSpecRawExtention = *providerSpec.Value
+// 	} else {
+// 		if providerSpec.ValueFrom.MachineClass == nil {
+// 			return nil, fmt.Errorf("unable to find MachineClass on Spec.ProviderSpec.ValueFrom")
+// 		}
+// 		machineClass := &machinev1.MachineClass{}
+// 		key := types.NamespacedName{
+// 			Namespace: providerSpec.ValueFrom.MachineClass.Namespace,
+// 			Name:      providerSpec.ValueFrom.MachineClass.Name,
+// 		}
+// 		if err := client.Get(context.Background(), key, machineClass); err != nil {
+// 			return nil, err
+// 		}
+// 		providerSpecRawExtention = machineClass.ProviderSpec
+// 	}
+
+// 	var config providerconfigv1.AWSMachineProviderConfig
+// 	if err := codec.DecodeProviderSpec(&machinev1.ProviderSpec{Value: &providerSpecRawExtention}, &config); err != nil {
+// 		return nil, err
+// 	}
+// 	return &config, nil
+// }
+
 // MachineConfigFromProviderSpec tries to decode the JSON-encoded spec, falling back on getting a MachineClass if the value is absent.
-func MachineConfigFromProviderSpec(clusterClient client.MachineClassesGetter, providerConfig clusterv1.ProviderSpec) (*v1alpha1.AzureMachineProviderSpec, error) {
+func MachineConfigFromProviderSpec(clusterClient client.Client, providerConfig machinev1.ProviderSpec) (*v1alpha1.AzureMachineProviderSpec, error) {
 	var config v1alpha1.AzureMachineProviderSpec
 	if providerConfig.Value != nil {
 		klog.V(4).Info("Decoding ProviderConfig from Value")
@@ -154,13 +252,18 @@ func MachineConfigFromProviderSpec(clusterClient client.MachineClassesGetter, pr
 
 		if len(ref.Namespace) > 0 && len(ref.Name) > 0 {
 			klog.V(4).Infof("Getting MachineClass: %s/%s", ref.Namespace, ref.Name)
-			mc, err := clusterClient.MachineClasses(ref.Namespace).Get(ref.Name, metav1.GetOptions{})
-			klog.V(6).Infof("Retrieved MachineClass: %+v", mc)
-			if err != nil {
+			machineClass := &machinev1.MachineClass{}
+			key := types.NamespacedName{
+				Namespace: providerConfig.ValueFrom.MachineClass.Namespace,
+				Name:      providerConfig.ValueFrom.MachineClass.Name,
+			}
+			if err := clusterClient.Get(context.Background(), key, machineClass); err != nil {
 				return nil, err
 			}
-			providerConfig.Value = &mc.ProviderSpec
-			return unmarshalProviderSpec(&mc.ProviderSpec)
+
+			klog.V(6).Infof("Retrieved MachineClass: %+v", machineClass)
+			providerConfig.Value = &machineClass.ProviderSpec
+			return unmarshalProviderSpec(&machineClass.ProviderSpec)
 		}
 	}
 

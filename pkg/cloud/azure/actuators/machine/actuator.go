@@ -18,15 +18,22 @@ package machine
 
 import (
 	"context"
-	"time"
 
+	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	apierrors "github.com/openshift/cluster-api/pkg/errors"
 	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/deployer"
-	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-	client "sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/typed/cluster/v1alpha1"
-	controllerError "sigs.k8s.io/cluster-api/pkg/controller/error"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+)
+
+const (
+	createEventAction = "Create"
+	updateEventAction = "Update"
+	deleteEventAction = "Delete"
+	noEventAction     = ""
 )
 
 //+kubebuilder:rbac:groups=azureprovider.k8s.io,resources=azuremachineproviderconfigs;azuremachineproviderstatuses,verbs=get;list;watch;create;update;patch;delete
@@ -36,29 +43,40 @@ import (
 
 // Actuator is responsible for performing machine reconciliation.
 type Actuator struct {
-	*deployer.Deployer
-
-	client client.ClusterV1alpha1Interface
+	client        client.Client
+	EventRecorder record.EventRecorder
 }
 
 // ActuatorParams holds parameter information for Actuator.
 type ActuatorParams struct {
-	Client client.ClusterV1alpha1Interface
+	Client        client.Client
+	EventRecorder record.EventRecorder
 }
 
 // NewActuator returns an actuator.
 func NewActuator(params ActuatorParams) *Actuator {
 	return &Actuator{
-		Deployer: deployer.New(deployer.Params{ScopeGetter: actuators.DefaultScopeGetter}),
-		client:   params.Client,
+		client:        params.Client,
+		EventRecorder: params.EventRecorder,
 	}
 }
 
-// Create creates a machine and is invoked by the machine controller.
-func (a *Actuator) Create(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	klog.Infof("Creating machine %v for cluster %v", machine.Name, cluster.Name)
+// Set corresponding event based on error. It also returns the original error
+// for convenience, so callers can do "return handleMachineError(...)".
+func (a *Actuator) handleMachineError(machine *machinev1.Machine, err *apierrors.MachineError, eventAction string) error {
+	if eventAction != noEventAction {
+		a.EventRecorder.Eventf(machine, corev1.EventTypeWarning, "Failed"+eventAction, "%v", err.Reason)
+	}
 
-	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Cluster: cluster, Client: a.client})
+	klog.Errorf("Machine error: %v", err.Message)
+	return err
+}
+
+// Create creates a machine and is invoked by the machine controller.
+func (a *Actuator) Create(ctx context.Context, cluster *machinev1.Cluster, machine *machinev1.Machine) error {
+	klog.Infof("Creating machine %v", machine.Name)
+
+	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Client: a.client})
 	if err != nil {
 		return errors.Errorf("failed to create scope: %+v", err)
 	}
@@ -66,20 +84,18 @@ func (a *Actuator) Create(ctx context.Context, cluster *clusterv1.Cluster, machi
 
 	err = NewReconciler(scope).Create(context.Background())
 	if err != nil {
-		klog.Errorf("failed to reconcile machine %s for cluster %s: %v", machine.Name, cluster.Name, err)
-		return &controllerError.RequeueAfterError{
-			RequeueAfter: time.Minute,
-		}
+		klog.Errorf("failed to reconcile machine %s: %v", machine.Name, err)
+		return a.handleMachineError(machine, apierrors.CreateMachine("%v", err), createEventAction)
 	}
 
 	return nil
 }
 
 // Delete deletes a machine and is invoked by the Machine Controller.
-func (a *Actuator) Delete(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	klog.Infof("Deleting machine %v for cluster %v.", machine.Name, cluster.Name)
+func (a *Actuator) Delete(ctx context.Context, cluster *machinev1.Cluster, machine *machinev1.Machine) error {
+	klog.Infof("Deleting machine %v.", machine.Name)
 
-	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Cluster: cluster, Client: a.client})
+	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Client: a.client})
 	if err != nil {
 		return errors.Wrapf(err, "failed to create scope")
 	}
@@ -88,10 +104,8 @@ func (a *Actuator) Delete(ctx context.Context, cluster *clusterv1.Cluster, machi
 
 	err = NewReconciler(scope).Delete(context.Background())
 	if err != nil {
-		klog.Errorf("failed to delete machine %s for cluster %s: %v", machine.Name, cluster.Name, err)
-		return &controllerError.RequeueAfterError{
-			RequeueAfter: time.Minute,
-		}
+		klog.Errorf("failed to delete machine %s: %v", machine.Name, err)
+		return a.handleMachineError(machine, apierrors.DeleteMachine("%v", err), noEventAction)
 	}
 
 	return nil
@@ -100,10 +114,10 @@ func (a *Actuator) Delete(ctx context.Context, cluster *clusterv1.Cluster, machi
 // Update updates a machine and is invoked by the Machine Controller.
 // If the Update attempts to mutate any immutable state, the method will error
 // and no updates will be performed.
-func (a *Actuator) Update(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) error {
-	klog.Infof("Updating machine %v for cluster %v.", machine.Name, cluster.Name)
+func (a *Actuator) Update(ctx context.Context, cluster *machinev1.Cluster, machine *machinev1.Machine) error {
+	klog.Infof("Updating machine %v.", machine.Name)
 
-	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Cluster: cluster, Client: a.client})
+	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Client: a.client})
 	if err != nil {
 		return errors.Errorf("failed to create scope: %+v", err)
 	}
@@ -112,20 +126,18 @@ func (a *Actuator) Update(ctx context.Context, cluster *clusterv1.Cluster, machi
 
 	err = NewReconciler(scope).Update(context.Background())
 	if err != nil {
-		klog.Errorf("failed to update machine %s for cluster %s: %v", machine.Name, cluster.Name, err)
-		return &controllerError.RequeueAfterError{
-			RequeueAfter: time.Minute,
-		}
+		klog.Errorf("failed to update machine %s: %v", machine.Name, err)
+		return a.handleMachineError(machine, apierrors.UpdateMachine("%v", err), updateEventAction)
 	}
 
 	return nil
 }
 
 // Exists test for the existence of a machine and is invoked by the Machine Controller
-func (a *Actuator) Exists(ctx context.Context, cluster *clusterv1.Cluster, machine *clusterv1.Machine) (bool, error) {
-	klog.Infof("Checking if machine %v for cluster %v exists", machine.Name, cluster.Name)
+func (a *Actuator) Exists(ctx context.Context, cluster *machinev1.Cluster, machine *machinev1.Machine) (bool, error) {
+	klog.Infof("Checking if machine %v exists", machine.Name)
 
-	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Cluster: cluster, Client: a.client})
+	scope, err := actuators.NewMachineScope(actuators.MachineScopeParams{Machine: machine, Client: a.client})
 	if err != nil {
 		return false, errors.Errorf("failed to create scope: %+v", err)
 	}
@@ -134,7 +146,7 @@ func (a *Actuator) Exists(ctx context.Context, cluster *clusterv1.Cluster, machi
 
 	isExists, err := NewReconciler(scope).Exists(context.Background())
 	if err != nil {
-		klog.Errorf("failed to check machine %s exists for cluster %s: %v", machine.Name, cluster.Name, err)
+		klog.Errorf("failed to check machine %s exists: %v", machine.Name, err)
 	}
 
 	return isExists, err

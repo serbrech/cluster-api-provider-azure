@@ -18,9 +18,7 @@ package main
 
 import (
 	"sigs.k8s.io/cluster-api-provider-azure/cmd/versioninfo"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators/cluster"
 	"sigs.k8s.io/cluster-api/cmd/clusterctl/cmd"
-	"sigs.k8s.io/cluster-api/pkg/apis/cluster/common"
 )
 
 func registerCustomCommands() {
@@ -28,8 +26,6 @@ func registerCustomCommands() {
 }
 
 func main() {
-	clusterActuator := cluster.NewActuator(cluster.ActuatorParams{})
-	common.RegisterClusterProvisioner("azure", clusterActuator)
 	registerCustomCommands()
 	cmd.Execute()
 }

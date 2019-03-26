@@ -18,68 +18,59 @@ package main
 
 import (
 	"flag"
+	"time"
 
+	clusterapis "github.com/openshift/cluster-api/pkg/apis"
+	"github.com/openshift/cluster-api/pkg/controller/machine"
 	"k8s.io/klog"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators/cluster"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators/machine"
-	"sigs.k8s.io/cluster-api-provider-azure/pkg/record"
-	clusterapis "sigs.k8s.io/cluster-api/pkg/apis"
-	"sigs.k8s.io/cluster-api/pkg/apis/cluster/common"
-	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset"
-	capicluster "sigs.k8s.io/cluster-api/pkg/controller/cluster"
-	capimachine "sigs.k8s.io/cluster-api/pkg/controller/machine"
+	machineactuator "sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators/machine"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/signals"
 )
 
 func main() {
-	klog.InitFlags(nil)
-	flag.Set("logtostderr", "true")
+	klogFlags := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(klogFlags)
+
 	flag.Parse()
+	flag.VisitAll(func(f1 *flag.Flag) {
+		f2 := klogFlags.Lookup(f1.Name)
+		if f2 != nil {
+			value := f1.Value.String()
+			f2.Value.Set(value)
+		}
+	})
 
 	cfg := config.GetConfigOrDie()
 
 	// Setup a Manager
-	mgr, err := manager.New(cfg, manager.Options{})
+	syncPeriod := 10 * time.Minute
+	mgr, err := manager.New(cfg, manager.Options{
+		SyncPeriod: &syncPeriod,
+	})
 	if err != nil {
 		klog.Fatalf("Failed to set up overall controller manager: %v", err)
-	}
-
-	cs, err := clientset.NewForConfig(cfg)
-	if err != nil {
-		klog.Fatalf("Failed to create client from configuration: %v", err)
-	}
-
-	// Initialize event recorder.
-	record.InitFromRecorder(mgr.GetRecorder("azure-controller"))
-
-	// Initialize cluster actuator.
-	clusterActuator := cluster.NewActuator(cluster.ActuatorParams{
-		Client: cs.ClusterV1alpha1(),
-	})
-
-	// Initialize machine actuator.
-	machineActuator := machine.NewActuator(machine.ActuatorParams{
-		Client: cs.ClusterV1alpha1(),
-	})
-
-	// Register our cluster deployer (the interface is in clusterctl and we define the Deployer interface on the actuator)
-	common.RegisterClusterProvisioner("azure", clusterActuator)
-
-	if err := apis.AddToScheme(mgr.GetScheme()); err != nil {
-		klog.Fatal(err)
 	}
 
 	if err := clusterapis.AddToScheme(mgr.GetScheme()); err != nil {
 		klog.Fatal(err)
 	}
 
-	capimachine.AddWithActuator(mgr, machineActuator)
-	capicluster.AddWithActuator(mgr, clusterActuator)
+	if err := machine.AddWithActuator(mgr, initActuator(mgr)); err != nil {
+		klog.Fatalf("Error adding actuator: %v", err)
+	}
 
 	if err := mgr.Start(signals.SetupSignalHandler()); err != nil {
 		klog.Fatalf("Failed to run manager: %v", err)
 	}
+}
+
+func initActuator(mgr manager.Manager) *machineactuator.Actuator {
+	params := machineactuator.ActuatorParams{
+		Client:        mgr.GetClient(),
+		EventRecorder: mgr.GetRecorder("azure-controller"),
+	}
+
+	return machineactuator.NewActuator(params)
 }

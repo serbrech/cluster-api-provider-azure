@@ -32,6 +32,10 @@ func SDKToVM(v compute.VirtualMachine) *v1alpha1.VM {
 		//State:    v1alpha1.VMState(*v.State.Name),
 	}
 
+	if v.VirtualMachineProperties != nil && v.VirtualMachineProperties.HardwareProfile != nil {
+		i.VMSize = string(v.VirtualMachineProperties.HardwareProfile.VMSize)
+	}
+
 	/*
 		if len(v.Tags) > 0 {
 			i.Tags = TagsToMap(v.Tags)

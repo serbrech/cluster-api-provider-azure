@@ -17,8 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubeadmv1beta1 "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm/v1beta1"
 )
 
 // +genclient
@@ -34,23 +34,17 @@ type AzureMachineProviderSpec struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Location      string `json:"location"`
-	VMSize        string `json:"vmSize"`
-	Image         Image  `json:"image"`
-	OSDisk        OSDisk `json:"osDisk"`
-	SSHPublicKey  string `json:"sshPublicKey"`
-	SSHPrivateKey string `json:"sshPrivateKey"`
-}
-
-// KubeadmConfiguration holds the various configurations that kubeadm uses.
-type KubeadmConfiguration struct {
-	// JoinConfiguration is used to customize any kubeadm join configuration
-	// parameters.
-	Join kubeadmv1beta1.JoinConfiguration `json:"join,omitempty"`
-
-	// InitConfiguration is used to customize any kubeadm init configuration
-	// parameters.
-	Init kubeadmv1beta1.InitConfiguration `json:"init,omitempty"`
+	// UserDataSecret contains a local reference to a secret that contains the
+	// UserData to apply to the instance
+	UserDataSecret *corev1.SecretReference `json:"userDataSecret,omitempty"`
+	// CredentialsSecret is a reference to the secret with Azure credentials.
+	CredentialsSecret *corev1.SecretReference `json:"credentialsSecret,omitempty"`
+	Location          string                  `json:"location"`
+	VMSize            string                  `json:"vmSize"`
+	Image             Image                   `json:"image"`
+	OSDisk            OSDisk                  `json:"osDisk"`
+	SSHPublicKey      string                  `json:"sshPublicKey"`
+	SSHPrivateKey     string                  `json:"sshPrivateKey"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object

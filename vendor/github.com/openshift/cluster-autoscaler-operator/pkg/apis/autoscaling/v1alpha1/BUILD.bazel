@@ -1,0 +1,25 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "clusterautoscaler_types.go",
+        "doc.go",
+        "machineautoscaler_types.go",
+        "register.go",
+        "zz_generated.deepcopy.go",
+        "zz_generated.defaults.go",
+        "zz_generated.openapi.go",
+    ],
+    importmap = "sigs.k8s.io/cluster-api-provider-azure/vendor/github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1alpha1",
+    importpath = "github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1alpha1",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//vendor/github.com/go-openapi/spec:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/runtime/schema:go_default_library",
+        "//vendor/k8s.io/kube-openapi/pkg/common:go_default_library",
+        "//vendor/sigs.k8s.io/controller-runtime/pkg/runtime/scheme:go_default_library",
+    ],
+)

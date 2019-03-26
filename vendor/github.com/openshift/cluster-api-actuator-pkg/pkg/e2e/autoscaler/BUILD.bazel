@@ -1,0 +1,26 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["autoscaler.go"],
+    importmap = "sigs.k8s.io/cluster-api-provider-azure/vendor/github.com/openshift/cluster-api-actuator-pkg/pkg/e2e/autoscaler",
+    importpath = "github.com/openshift/cluster-api-actuator-pkg/pkg/e2e/autoscaler",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//vendor/github.com/golang/glog:go_default_library",
+        "//vendor/github.com/onsi/ginkgo:go_default_library",
+        "//vendor/github.com/onsi/gomega:go_default_library",
+        "//vendor/github.com/openshift/cluster-api-actuator-pkg/pkg/e2e/framework:go_default_library",
+        "//vendor/github.com/openshift/cluster-api/pkg/apis/machine/v1beta1:go_default_library",
+        "//vendor/github.com/openshift/cluster-autoscaler-operator/pkg/apis/autoscaling/v1alpha1:go_default_library",
+        "//vendor/k8s.io/api/batch/v1:go_default_library",
+        "//vendor/k8s.io/api/core/v1:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/api/resource:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/apis/meta/v1:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/types:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/uuid:go_default_library",
+        "//vendor/k8s.io/apimachinery/pkg/util/wait:go_default_library",
+        "//vendor/k8s.io/utils/pointer:go_default_library",
+        "//vendor/sigs.k8s.io/controller-runtime/pkg/client:go_default_library",
+    ],
+)

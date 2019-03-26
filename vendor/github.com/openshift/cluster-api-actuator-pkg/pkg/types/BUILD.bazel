@@ -1,0 +1,10 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = ["types.go"],
+    importmap = "sigs.k8s.io/cluster-api-provider-azure/vendor/github.com/openshift/cluster-api-actuator-pkg/pkg/types",
+    importpath = "github.com/openshift/cluster-api-actuator-pkg/pkg/types",
+    visibility = ["//visibility:public"],
+    deps = ["//vendor/github.com/openshift/cluster-api/pkg/apis/machine/v1beta1:go_default_library"],
+)

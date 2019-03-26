@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/json"
-	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/runtime/scheme"
 	"sigs.k8s.io/yaml"
 )
@@ -40,33 +39,6 @@ var (
 	// SchemeBuilder is used to add go types to the GroupVersionKind scheme
 	SchemeBuilder = &scheme.Builder{GroupVersion: SchemeGroupVersion}
 )
-
-// ClusterConfigFromProviderSpec unmarshals a provider config into an Azure Cluster type
-func ClusterConfigFromProviderSpec(providerConfig clusterv1.ProviderSpec) (*AzureClusterProviderSpec, error) {
-	var config AzureClusterProviderSpec
-	if providerConfig.Value == nil {
-		return &config, nil
-	}
-
-	if err := yaml.Unmarshal(providerConfig.Value.Raw, &config); err != nil {
-		return nil, err
-	}
-	return &config, nil
-}
-
-// ClusterStatusFromProviderStatus unmarshals a raw extension into an Azure Cluster type
-func ClusterStatusFromProviderStatus(extension *runtime.RawExtension) (*AzureClusterProviderStatus, error) {
-	if extension == nil {
-		return &AzureClusterProviderStatus{}, nil
-	}
-
-	status := new(AzureClusterProviderStatus)
-	if err := yaml.Unmarshal(extension.Raw, status); err != nil {
-		return nil, err
-	}
-
-	return status, nil
-}
 
 // MachineStatusFromProviderStatus unmarshals a raw extension into an Azure machine type
 func MachineStatusFromProviderStatus(extension *runtime.RawExtension) (*AzureMachineProviderStatus, error) {
@@ -103,44 +75,6 @@ func EncodeMachineStatus(status *AzureMachineProviderStatus) (*runtime.RawExtens
 
 // EncodeMachineSpec marshals the machine provider spec.
 func EncodeMachineSpec(spec *AzureMachineProviderSpec) (*runtime.RawExtension, error) {
-	if spec == nil {
-		return &runtime.RawExtension{}, nil
-	}
-
-	var rawBytes []byte
-	var err error
-
-	//  TODO: use apimachinery conversion https://godoc.org/k8s.io/apimachinery/pkg/runtime#Convert_runtime_Object_To_runtime_RawExtension
-	if rawBytes, err = json.Marshal(spec); err != nil {
-		return nil, err
-	}
-
-	return &runtime.RawExtension{
-		Raw: rawBytes,
-	}, nil
-}
-
-// EncodeClusterStatus marshals the cluster status.
-func EncodeClusterStatus(status *AzureClusterProviderStatus) (*runtime.RawExtension, error) {
-	if status == nil {
-		return &runtime.RawExtension{}, nil
-	}
-
-	var rawBytes []byte
-	var err error
-
-	//  TODO: use apimachinery conversion https://godoc.org/k8s.io/apimachinery/pkg/runtime#Convert_runtime_Object_To_runtime_RawExtension
-	if rawBytes, err = json.Marshal(status); err != nil {
-		return nil, err
-	}
-
-	return &runtime.RawExtension{
-		Raw: rawBytes,
-	}, nil
-}
-
-// EncodeClusterSpec marshals the cluster provider spec.
-func EncodeClusterSpec(spec *AzureClusterProviderSpec) (*runtime.RawExtension, error) {
 	if spec == nil {
 		return &runtime.RawExtension{}, nil
 	}
