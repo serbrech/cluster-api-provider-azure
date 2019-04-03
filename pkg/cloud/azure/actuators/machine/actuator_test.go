@@ -16,223 +16,157 @@ limitations under the License.
 
 package machine
 
-// import (
-// 	"context"
-// 	"testing"
+import (
+	"context"
+	"testing"
 
-// 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
-// 	"github.com/Azure/go-autorest/autorest/to"
-// 	"github.com/ghodss/yaml"
-// 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-// 	"k8s.io/apimachinery/pkg/runtime"
-// 	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
-// 	providerv1 "sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
-// 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure"
-// 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators"
-// 	clusterv1 "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1"
-// 	"sigs.k8s.io/cluster-api/pkg/client/clientset_generated/clientset/fake"
-// 	"sigs.k8s.io/cluster-api/pkg/controller/machine"
-// )
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
+	"github.com/Azure/go-autorest/autorest/to"
+	"github.com/ghodss/yaml"
+	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
+	providerv1 "sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
+	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators"
+)
 
-// var (
-// 	_ machine.Actuator = (*Actuator)(nil)
-// )
+var (
+//_ machine.Actuator = (*Actuator)(nil)
+)
 
-// func newClusterProviderSpec() providerv1.AzureClusterProviderSpec {
-// 	return providerv1.AzureClusterProviderSpec{
-// 		ResourceGroup: "resource-group-test",
-// 		Location:      "southcentralus",
-// 	}
-// }
+func providerSpecFromMachine(in *providerv1.AzureMachineProviderSpec) (*machinev1.ProviderSpec, error) {
+	bytes, err := yaml.Marshal(in)
+	if err != nil {
+		return nil, err
+	}
+	return &machinev1.ProviderSpec{
+		Value: &runtime.RawExtension{Raw: bytes},
+	}, nil
+}
 
-// func providerSpecFromMachine(in *providerv1.AzureMachineProviderSpec) (*clusterv1.ProviderSpec, error) {
-// 	bytes, err := yaml.Marshal(in)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return &clusterv1.ProviderSpec{
-// 		Value: &runtime.RawExtension{Raw: bytes},
-// 	}, nil
-// }
+func newMachine(t *testing.T, machineConfig providerv1.AzureMachineProviderSpec, labels map[string]string) *machinev1.Machine {
+	providerSpec, err := providerSpecFromMachine(&machineConfig)
+	if err != nil {
+		t.Fatalf("error encoding provider config: %v", err)
+	}
+	return &machinev1.Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "machine-test",
+			Labels: labels,
+		},
+		Spec: machinev1.MachineSpec{
+			ProviderSpec: *providerSpec,
+			Versions: machinev1.MachineVersionInfo{
+				Kubelet:      "1.9.4",
+				ControlPlane: "1.9.4",
+			},
+		},
+	}
+}
 
-// func providerSpecFromCluster(in *providerv1.AzureClusterProviderSpec) (*clusterv1.ProviderSpec, error) {
-// 	bytes, err := yaml.Marshal(in)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	return &clusterv1.ProviderSpec{
-// 		Value: &runtime.RawExtension{Raw: bytes},
-// 	}, nil
-// }
+func createFakeScope(t *testing.T, label string) *actuators.MachineScope {
+	labels := make(map[string]string)
+	labels["machine.openshift.io/cluster-api-machine-role"] = label
+	machineConfig := providerv1.AzureMachineProviderSpec{}
+	m := newMachine(t, machineConfig, labels)
+	//c := fake.NewFakeClient(m)
+	return &actuators.MachineScope{
+		Machine: m,
+		//	MachineClient: c,
+		MachineConfig: &v1alpha1.AzureMachineProviderSpec{},
+		MachineStatus: &v1alpha1.AzureMachineProviderStatus{},
+	}
+}
 
-// func newMachine(t *testing.T, machineConfig providerv1.AzureMachineProviderSpec, labels map[string]string) *clusterv1.Machine {
-// 	providerSpec, err := providerSpecFromMachine(&machineConfig)
-// 	if err != nil {
-// 		t.Fatalf("error encoding provider config: %v", err)
-// 	}
-// 	return &clusterv1.Machine{
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name:   "machine-test",
-// 			Labels: labels,
-// 		},
-// 		Spec: clusterv1.MachineSpec{
-// 			ProviderSpec: *providerSpec,
-// 			Versions: clusterv1.MachineVersionInfo{
-// 				Kubelet:      "1.9.4",
-// 				ControlPlane: "1.9.4",
-// 			},
-// 		},
-// 	}
-// }
+// FakeVMService generic vm service
+type FakeVMService struct {
+	Name              string
+	ID                string
+	ProvisioningState string
+}
 
-// func newCluster(t *testing.T) *clusterv1.Cluster {
-// 	clusterProviderSpec := newClusterProviderSpec()
-// 	providerSpec, err := providerSpecFromCluster(&clusterProviderSpec)
-// 	if err != nil {
-// 		t.Fatalf("error encoding provider config: %v", err)
-// 	}
+// Get returns fake success.
+func (s *FakeVMService) Get(ctx context.Context, spec azure.Spec) (interface{}, error) {
+	return compute.VirtualMachine{
+		ID:   to.StringPtr(s.ID),
+		Name: to.StringPtr(s.Name),
+		VirtualMachineProperties: &compute.VirtualMachineProperties{
+			ProvisioningState: to.StringPtr(s.ProvisioningState),
+		},
+	}, nil
+}
 
-// 	return &clusterv1.Cluster{
-// 		TypeMeta: metav1.TypeMeta{
-// 			Kind: "Cluster",
-// 		},
-// 		ObjectMeta: metav1.ObjectMeta{
-// 			Name: "cluster-test",
-// 		},
-// 		Spec: clusterv1.ClusterSpec{
-// 			ClusterNetwork: clusterv1.ClusterNetworkingConfig{
-// 				Services: clusterv1.NetworkRanges{
-// 					CIDRBlocks: []string{
-// 						"10.96.0.0/12",
-// 					},
-// 				},
-// 				Pods: clusterv1.NetworkRanges{
-// 					CIDRBlocks: []string{
-// 						"192.168.0.0/16",
-// 					},
-// 				},
-// 			},
-// 			ProviderSpec: *providerSpec,
-// 		},
-// 	}
-// }
-// func createFakeScope(t *testing.T, label string) *actuators.MachineScope {
-// 	scope := &actuators.Scope{
-// 		Context: context.Background(),
-// 		Cluster: newCluster(t),
-// 		ClusterConfig: &v1alpha1.AzureClusterProviderSpec{
-// 			ResourceGroup:       "dummyResourceGroup",
-// 			Location:            "dummyLocation",
-// 			CAKeyPair:           v1alpha1.KeyPair{Cert: []byte("cert"), Key: []byte("key")},
-// 			EtcdCAKeyPair:       v1alpha1.KeyPair{Cert: []byte("cert"), Key: []byte("key")},
-// 			FrontProxyCAKeyPair: v1alpha1.KeyPair{Cert: []byte("cert"), Key: []byte("key")},
-// 			SAKeyPair:           v1alpha1.KeyPair{Cert: []byte("cert"), Key: []byte("key")},
-// 			DiscoveryHashes:     []string{"discoveryhash0"},
-// 		},
-// 		ClusterStatus: &v1alpha1.AzureClusterProviderStatus{},
-// 	}
-// 	scope.Network().APIServerIP.DNSName = "DummyDNSName"
-// 	labels := make(map[string]string)
-// 	labels["set"] = label
-// 	machineConfig := providerv1.AzureMachineProviderSpec{}
-// 	m := newMachine(t, machineConfig, labels)
-// 	c := fake.NewSimpleClientset(m).ClusterV1alpha1()
-// 	return &actuators.MachineScope{
-// 		Scope:         scope,
-// 		Machine:       m,
-// 		MachineClient: c.Machines("dummyNamespace"),
-// 		MachineConfig: &v1alpha1.AzureMachineProviderSpec{},
-// 		MachineStatus: &v1alpha1.AzureMachineProviderStatus{},
-// 	}
-// }
+// CreateOrUpdate returns fake success.
+func (s *FakeVMService) CreateOrUpdate(ctx context.Context, spec azure.Spec) error {
+	return nil
+}
 
-// // FakeVMService generic vm service
-// type FakeVMService struct {
-// 	Name              string
-// 	ID                string
-// 	ProvisioningState string
-// }
+// Delete returns fake success.
+func (s *FakeVMService) Delete(ctx context.Context, spec azure.Spec) error {
+	return nil
+}
 
-// // Get returns fake success.
-// func (s *FakeVMService) Get(ctx context.Context, spec azure.Spec) (interface{}, error) {
-// 	return compute.VirtualMachine{
-// 		ID:   to.StringPtr(s.ID),
-// 		Name: to.StringPtr(s.Name),
-// 		VirtualMachineProperties: &compute.VirtualMachineProperties{
-// 			ProvisioningState: to.StringPtr(s.ProvisioningState),
-// 		},
-// 	}, nil
-// }
+func TestReconcilerSuccess(t *testing.T) {
+	// fakeSuccessSvc := &azure.FakeSuccessService{}
+	// fakeVMSuccessSvc := &FakeVMService{
+	// 	Name:              "machine-test",
+	// 	ID:                "machine-test-ID",
+	// 	ProvisioningState: "Succeeded",
+	// }
 
-// // CreateOrUpdate returns fake success.
-// func (s *FakeVMService) CreateOrUpdate(ctx context.Context, spec azure.Spec) error {
-// 	return nil
-// }
+	createFakeScope(t, v1alpha1.Node)
 
-// // Delete returns fake success.
-// func (s *FakeVMService) Delete(ctx context.Context, spec azure.Spec) error {
-// 	return nil
-// }
+	// fakeReconciler := &Reconciler{
+	// 	scope:                fakeScope,
+	// 	networkInterfacesSvc: fakeSuccessSvc,
+	// 	virtualMachinesSvc:   fakeVMSuccessSvc,
+	// }
 
-// func TestReconcilerSuccess(t *testing.T) {
-// 	fakeSuccessSvc := &azure.FakeSuccessService{}
-// 	fakeVMSuccessSvc := &FakeVMService{
-// 		Name:              "machine-test",
-// 		ID:                "machine-test-ID",
-// 		ProvisioningState: "Succeeded",
-// 	}
+	// if err := fakeReconciler.Create(context.Background()); err != nil {
+	// 	t.Errorf("failed to create machine: %+v", err)
+	// }
 
-// 	fakeReconciler := &Reconciler{
-// 		scope:                 createFakeScope(t, v1alpha1.ControlPlane),
-// 		networkInterfacesSvc:  fakeSuccessSvc,
-// 		virtualMachinesSvc:    fakeVMSuccessSvc,
-// 		virtualMachinesExtSvc: fakeSuccessSvc,
-// 	}
+	// if err := fakeReconciler.Update(context.Background()); err != nil {
+	// 	t.Errorf("failed to update machine: %+v", err)
+	// }
 
-// 	if err := fakeReconciler.Create(context.Background()); err != nil {
-// 		t.Errorf("failed to create machine: %+v", err)
-// 	}
+	// if _, err := fakeReconciler.Exists(context.Background()); err != nil {
+	// 	t.Errorf("failed to check if machine exists: %+v", err)
+	// }
 
-// 	if err := fakeReconciler.Update(context.Background()); err != nil {
-// 		t.Errorf("failed to update machine: %+v", err)
-// 	}
+	// if err := fakeReconciler.Delete(context.Background()); err != nil {
+	// 	t.Errorf("failed to delete machine: %+v", err)
+	// }
+}
 
-// 	if _, err := fakeReconciler.Exists(context.Background()); err != nil {
-// 		t.Errorf("failed to check if machine exists: %+v", err)
-// 	}
+func TestReconcileFailure(t *testing.T) {
+	//fakeSuccessSvc := &azure.FakeSuccessService{}
+	fakeFailureSvc := &azure.FakeFailureService{}
 
-// 	if err := fakeReconciler.Delete(context.Background()); err != nil {
-// 		t.Errorf("failed to delete machine: %+v", err)
-// 	}
-// }
+	fakeReconciler := &Reconciler{
+		scope:                createFakeScope(t, v1alpha1.Node),
+		networkInterfacesSvc: fakeFailureSvc,
+		virtualMachinesSvc:   fakeFailureSvc,
+	}
 
-// func TestReconcileFailure(t *testing.T) {
-// 	fakeSuccessSvc := &azure.FakeSuccessService{}
-// 	fakeFailureSvc := &azure.FakeFailureService{}
+	if err := fakeReconciler.Create(context.Background()); err == nil {
+		t.Errorf("expected createa to fail")
+	}
 
-// 	fakeReconciler := &Reconciler{
-// 		scope:                 createFakeScope(t, v1alpha1.ControlPlane),
-// 		networkInterfacesSvc:  fakeFailureSvc,
-// 		virtualMachinesSvc:    fakeFailureSvc,
-// 		virtualMachinesExtSvc: fakeSuccessSvc,
-// 	}
+	if err := fakeReconciler.Update(context.Background()); err == nil {
+		t.Errorf("expected update to fail")
+	}
 
-// 	if err := fakeReconciler.Create(context.Background()); err == nil {
-// 		t.Errorf("expected createa to fail")
-// 	}
+	if _, err := fakeReconciler.Exists(context.Background()); err == nil {
+		t.Errorf("expected exists to fail")
+	}
 
-// 	if err := fakeReconciler.Update(context.Background()); err == nil {
-// 		t.Errorf("expected update to fail")
-// 	}
-
-// 	if _, err := fakeReconciler.Exists(context.Background()); err == nil {
-// 		t.Errorf("expected exists to fail")
-// 	}
-
-// 	if err := fakeReconciler.Delete(context.Background()); err == nil {
-// 		t.Errorf("expected delete to fail")
-// 	}
-// }
+	if err := fakeReconciler.Delete(context.Background()); err == nil {
+		t.Errorf("expected delete to fail")
+	}
+}
 
 // func TestNodeJoinFirstControlPlane(t *testing.T) {
 // 	fakeSuccessSvc := &azure.FakeSuccessService{}
