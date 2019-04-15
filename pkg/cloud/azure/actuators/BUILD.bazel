@@ -2,7 +2,10 @@ load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
     name = "go_default_library",
-    srcs = ["machine_scope.go"],
+    srcs = [
+        "azure_auth.go",
+        "machine_scope.go",
+    ],
     importpath = "sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/actuators",
     visibility = ["//visibility:public"],
     deps = [
@@ -16,6 +19,7 @@ go_library(
         "//vendor/k8s.io/apimachinery/pkg/runtime:go_default_library",
         "//vendor/k8s.io/apimachinery/pkg/types:go_default_library",
         "//vendor/k8s.io/klog:go_default_library",
+        "//vendor/k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth:go_default_library",
         "//vendor/sigs.k8s.io/controller-runtime/pkg/client:go_default_library",
         "//vendor/sigs.k8s.io/yaml:go_default_library",
     ],

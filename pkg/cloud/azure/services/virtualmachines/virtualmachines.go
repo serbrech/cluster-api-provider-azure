@@ -23,24 +23,27 @@ import (
 	"fmt"
 
 	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/msi/mgmt/2018-11-30/msi"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-12-01/network"
 	"github.com/Azure/go-autorest/autorest/to"
 	"github.com/pkg/errors"
 	"k8s.io/klog"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure"
+	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/services/managedidentities"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/services/networkinterfaces"
 )
 
 // Spec input specification for Get/CreateOrUpdate/Delete calls
 type Spec struct {
-	Name       string
-	NICName    string
-	SSHKeyData string
-	Size       string
-	Image      v1alpha1.Image
-	OSDisk     v1alpha1.OSDisk
-	CustomData string
+	Name                   string
+	NICName                string
+	SSHKeyData             string
+	Size                   string
+	UserAssignedIdentityID string
+	Image                  v1alpha1.Image
+	OSDisk                 v1alpha1.OSDisk
+	CustomData             string
 }
 
 // Get provides information about a virtual network.
@@ -121,12 +124,33 @@ func (s *Service) CreateOrUpdate(ctx context.Context, spec azure.Spec) error {
 		osProfile.CustomData = to.StringPtr(vmSpec.CustomData)
 	}
 
+	var vmIdentity *compute.VirtualMachineIdentity
+	if len(vmSpec.UserAssignedIdentityID) > 0 {
+		identityInterface, err := managedidentities.NewService(s.Scope).Get(ctx, managedidentities.Spec{Name: vmSpec.UserAssignedIdentityID})
+		if err != nil {
+			return err
+		}
+		identity, ok := identityInterface.(msi.Identity)
+		if !ok {
+			return errors.New("failed getting user assigned identity")
+		}
+		klog.V(2).Infof("got identity %s", vmSpec.UserAssignedIdentityID)
+
+		vmIdentity = &compute.VirtualMachineIdentity{
+			Type: compute.ResourceIdentityTypeUserAssigned,
+			UserAssignedIdentities: map[string]*compute.VirtualMachineIdentityUserAssignedIdentitiesValue{
+				*identity.ID: &compute.VirtualMachineIdentityUserAssignedIdentitiesValue{},
+			},
+		}
+	}
+
 	future, err := s.Client.CreateOrUpdate(
 		ctx,
 		s.Scope.ResourceGroup(),
 		vmSpec.Name,
 		compute.VirtualMachine{
 			Location: to.StringPtr(s.Scope.Location()),
+			Identity: vmIdentity,
 			VirtualMachineProperties: &compute.VirtualMachineProperties{
 				HardwareProfile: &compute.HardwareProfile{
 					VMSize: compute.VirtualMachineSizeTypes(vmSpec.Size),

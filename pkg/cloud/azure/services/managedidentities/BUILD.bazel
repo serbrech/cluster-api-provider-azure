@@ -1,0 +1,19 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "go_default_library",
+    srcs = [
+        "managedIdentities.go",
+        "service.go",
+    ],
+    importpath = "sigs.k8s.io/cluster-api-provider-azure/pkg/cloud/azure/services/managedidentities",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/cloud/azure:go_default_library",
+        "//pkg/cloud/azure/actuators:go_default_library",
+        "//vendor/github.com/Azure/azure-sdk-for-go/services/msi/mgmt/2018-11-30/msi:go_default_library",
+        "//vendor/github.com/Azure/go-autorest/autorest:go_default_library",
+        "//vendor/github.com/google/uuid:go_default_library",
+        "//vendor/github.com/pkg/errors:go_default_library",
+    ],
+)

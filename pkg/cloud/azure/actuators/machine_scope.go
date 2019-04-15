@@ -18,17 +18,14 @@ package actuators
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/adal"
-	"github.com/Azure/go-autorest/autorest/azure"
 	machinev1 "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
 	"github.com/pkg/errors"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types" //metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog"
+	"k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth"
 	"sigs.k8s.io/cluster-api-provider-azure/pkg/apis/azureprovider/v1alpha1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/yaml"
@@ -68,56 +65,17 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 		return nil, errors.Wrap(err, "failed to get machine provider status")
 	}
 
-	secretName := fmt.Sprintf("%s/%s", machineConfig.CredentialsSecret.Namespace, machineConfig.CredentialsSecret.Name)
-
-	var secret corev1.Secret
-	if err := params.Client.Get(context.Background(), client.ObjectKey{Namespace: machineConfig.CredentialsSecret.Namespace, Name: machineConfig.CredentialsSecret.Name}, &secret); err != nil {
-		return nil, err
-	}
-
-	subscriptionID, ok := secret.Data[AzureCredsSubscriptionIDKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure subscription id %v did not contain key %v",
-			secretName, AzureCredsSubscriptionIDKey)
-	}
-	clientID, ok := secret.Data[AzureCredsClientIDKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure client id %v did not contain key %v",
-			secretName, AzureCredsClientIDKey)
-	}
-	clientSecret, ok := secret.Data[AzureCredsClientSecretKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure client secret %v did not contain key %v",
-			secretName, AzureCredsClientSecretKey)
-	}
-	tenantID, ok := secret.Data[AzureCredsTenantIDKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure tenant id %v did not contain key %v",
-			secretName, AzureCredsTenantIDKey)
-	}
-	resourceGroup, ok := secret.Data[AzureCredsResourceGroupKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure resource group %v did not contain key %v",
-			secretName, AzureCredsResourceGroupKey)
-	}
-	region, ok := secret.Data[AzureCredsRegionKey]
-	if !ok {
-		return nil, fmt.Errorf("Azure region %v did not contain key %v",
-			secretName, AzureCredsRegionKey)
-	}
-
-	env, err := azure.EnvironmentFromName("AzurePublicCloud")
-	if err != nil {
-		return nil, err
-	}
-	oauthConfig, err := adal.NewOAuthConfig(
-		env.ActiveDirectoryEndpoint, string(tenantID))
+	env, err := auth.ParseAzureEnvironment("AzurePublicCloud")
 	if err != nil {
 		return nil, err
 	}
 
-	token, err := adal.NewServicePrincipalToken(
-		*oauthConfig, string(clientID), string(clientSecret), env.ResourceManagerEndpoint)
+	authConfig, err := getAuthConfig(machineConfig, params.Client)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to parse azure auth configuration")
+	}
+
+	token, err := getServicePrincipalToken(authConfig, env)
 	if err != nil {
 		return nil, err
 	}
@@ -129,9 +87,9 @@ func NewMachineScope(params MachineScopeParams) (*MachineScope, error) {
 
 	return &MachineScope{
 		Authorizer:     authorizer,
-		SubscriptionID: string(subscriptionID),
-		Region:         string(region),
-		Group:          string(resourceGroup),
+		SubscriptionID: string(authConfig.SubscriptionID),
+		Region:         string(authConfig.Region),
+		Group:          string(authConfig.ResourceGroup),
 		Machine:        params.Machine,
 		MachineClient:  params.Client,
 		MachineConfig:  machineConfig,

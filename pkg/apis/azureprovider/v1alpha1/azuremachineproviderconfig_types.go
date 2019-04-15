@@ -45,6 +45,12 @@ type AzureMachineProviderSpec struct {
 	OSDisk            OSDisk                  `json:"osDisk"`
 	SSHPublicKey      string                  `json:"sshPublicKey"`
 	SSHPrivateKey     string                  `json:"sshPrivateKey"`
+	// Use managed service identity for the virtual machine to access Azure ARM APIs
+	UseManagedIdentityExtension bool `json:"useManagedIdentityExtension"`
+	// UserAssignedIdentityID contains the Client ID of the user assigned MSI which is assigned to the underlying VMs. If empty the user assigned identity is not used.
+	// More details of the user assigned identity can be found at: https://docs.microsoft.com/en-us/azure/active-directory/managed-service-identity/overview
+	// For the user assigned identity specified here to be used, the UseManagedIdentityExtension has to be set to true.
+	UserAssignedIdentityID string `json:"userAssignedIdentityID"`
 }
 
 // +k8s:deepcopy-gen:interfaces=k8s.io/apimachinery/pkg/runtime.Object
