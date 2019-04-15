@@ -18,10 +18,11 @@
   version = "v0.2.0"
 
 [[projects]]
-  digest = "1:5819e60351a77a1aa5a18dc0dca0e68eab9de0eb41408505d9e6a549d662a130"
+  digest = "1:0ed30c64be235202cc2efda68b36a6f5388f538f30a17270bcc5bb84210a43ef"
   name = "github.com/Azure/azure-sdk-for-go"
   packages = [
     "services/compute/mgmt/2018-10-01/compute",
+    "services/msi/mgmt/2018-11-30/msi",
     "services/network/mgmt/2018-12-01/network",
     "services/resources/mgmt/2018-05-01/resources",
     "version",
@@ -629,6 +630,14 @@
   version = "v1.2.2"
 
 [[projects]]
+  digest = "1:274f67cb6fed9588ea2521ecdac05a6d62a8c51c074c1fccc6a49a40ba80e925"
+  name = "github.com/satori/go.uuid"
+  packages = ["."]
+  pruneopts = "UT"
+  revision = "f58768cc1a7a7e77a3bd49e98cdd21419399b6a3"
+  version = "v1.2.0"
+
+[[projects]]
   digest = "1:3e39bafd6c2f4bf3c76c3bfd16a2e09e016510ad5db90dc02b88e2f565d6d595"
   name = "github.com/spf13/afero"
   packages = [
@@ -712,7 +721,7 @@
 
 [[projects]]
   branch = "master"
-  digest = "1:5b1e3560b10bebafefcafa45db8cb121bfa1994b1503997b8b46631c2540e79a"
+  digest = "1:a131201d673f8a7703ce8f171ddd4e88478f9229b8c10d31d86d4d57fbd4368a"
   name = "golang.org/x/crypto"
   packages = [
     "curve25519",
@@ -720,6 +729,8 @@
     "ed25519/internal/edwards25519",
     "internal/chacha20",
     "internal/subtle",
+    "pkcs12",
+    "pkcs12/internal/rc2",
     "poly1305",
     "ssh",
     "ssh/terminal",
@@ -1202,6 +1213,14 @@
   revision = "b3a7cee44a305be0a69e1b9ac03018307287e1b0"
 
 [[projects]]
+  digest = "1:925c1820eef44f48933e0ce6a9c29ffaeb458d663f5e8a9d68c35b4aa8a987cc"
+  name = "k8s.io/kubernetes"
+  packages = ["pkg/cloudprovider/providers/azure/auth"]
+  pruneopts = "UT"
+  revision = "b7394102d6ef778017f2ca4046abbaa23b88c290"
+  version = "v1.14.1"
+
+[[projects]]
   branch = "master"
   digest = "1:f8ae6e0da72b154967c7e6b7566486fc0337ac0d5d0362db67f9c31323a03c28"
   name = "k8s.io/utils"
@@ -1323,6 +1342,7 @@
   analyzer-version = 1
   input-imports = [
     "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute",
+    "github.com/Azure/azure-sdk-for-go/services/msi/mgmt/2018-11-30/msi",
     "github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-12-01/network",
     "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2018-05-01/resources",
     "github.com/Azure/go-autorest/autorest",
@@ -1331,6 +1351,7 @@
     "github.com/Azure/go-autorest/autorest/to",
     "github.com/emicklei/go-restful",
     "github.com/ghodss/yaml",
+    "github.com/google/uuid",
     "github.com/onsi/ginkgo",
     "github.com/onsi/gomega",
     "github.com/openshift/api/config/v1",
@@ -1355,6 +1376,7 @@
     "k8s.io/client-go/tools/record",
     "k8s.io/code-generator/cmd/deepcopy-gen",
     "k8s.io/klog",
+    "k8s.io/kubernetes/pkg/cloudprovider/providers/azure/auth",
     "sigs.k8s.io/cluster-api/cmd/clusterctl/clientcmd",
     "sigs.k8s.io/cluster-api/cmd/clusterctl/cmd",
     "sigs.k8s.io/cluster-api/pkg/apis/cluster/v1alpha1",
